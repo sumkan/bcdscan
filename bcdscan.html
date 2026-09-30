@@ -2,314 +2,644 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>バーコード読み取り & カメラ撮影アプリ</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>バーコード商品撮影カメラ</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- ZXing Library for Barcode/QR Scanning -->
+    <!-- ZXing Library for Barcode / QR Reading -->
     <script src="https://unpkg.com/@zxing/library@latest"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- JSZip & FileSaver for Zip Download -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
     <style>
-        /* タップ時のハイライトを無効化 */
-        * { -webkit-tap-highlight-color: transparent; }
-        /* スキャンラインのアニメーション */
-        @keyframes scan {
-            0% { top: 0%; opacity: 0.8; }
-            50% { opacity: 1; }
-            100% { top: 100%; opacity: 0.8; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            touch-action: manipulation;
         }
-        .scan-line {
+        .scanner-container {
+            position: relative;
+            overflow: hidden;
+            border-radius: 1rem;
+            background-color: #000;
+        }
+        .scanner-laser {
             position: absolute;
-            left: 0;
-            right: 0;
-            height: 3px;
-            background: linear-gradient(90deg, rgba(239, 68, 68, 0) 0%, rgba(239, 68, 68, 1) 50%, rgba(239, 68, 68, 0) 100%);
-            box-shadow: 0 0 12px rgba(239, 68, 68, 0.8);
-            animation: scan 2s linear infinite;
+            top: 50%;
+            left: 10%;
+            right: 10%;
+            height: 2px;
+            background: #ef4444;
+            box-shadow: 0 0 8px #ef4444;
+            animation: scan 2s infinite ease-in-out;
+            pointer-events: none;
+            z-index: 10;
+        }
+        @keyframes scan {
+            0%, 100% { top: 25%; }
+            50% { top: 75%; }
+        }
+        .guide-box {
+            position: absolute;
+            top: 25%;
+            left: 10%;
+            right: 10%;
+            bottom: 25%;
+            border: 2px dashed rgba(255, 255, 255, 0.7);
+            border-radius: 12px;
+            pointer-events: none;
+            z-index: 5;
         }
     </style>
 </head>
-<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans select-none">
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col max-w-md mx-auto shadow-2xl">
 
-    <!-- ヘッダー -->
-    <header class="bg-slate-800/80 backdrop-blur border-b border-slate-700 p-4 sticky top-0 z-20 flex items-center justify-between">
-        <div class="flex items-center space-x-2">
-            <i data-lucide="barcode" class="w-6 h-6 text-indigo-400"></i>
-            <h1 class="text-lg font-bold tracking-wide">Barcode Cam</h1>
+    <header class="bg-slate-800 p-4 sticky top-0 z-50 flex justify-between items-center border-b border-slate-700">
+        <div class="flex items-center gap-2">
+            <i class="fa-solid font-bold text-indigo-400 text-xl fa-barcode"></i>
+            <h1 class="font-bold text-lg tracking-wide">Barcode Cam</h1>
         </div>
-        <div class="flex items-center space-x-2">
-            <button id="switchCamBtn" class="p-2 rounded-full bg-slate-700 active:bg-slate-600 text-slate-200 transition">
-                <i data-lucide="switch-camera" class="w-5 h-5"></i>
+        <div class="flex gap-2">
+            <button id="tabScannerBtn" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium text-xs flex items-center gap-1 transition">
+                <i class="fa-solid fa-camera"></i> 撮影
             </button>
-            <button id="torchBtn" class="p-2 rounded-full bg-slate-700 active:bg-slate-600 text-slate-200 transition hidden">
-                <i data-lucide="zap" class="w-5 h-5"></i>
+            <button id="tabGalleryBtn" class="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 font-medium text-xs flex items-center gap-1 transition relative">
+                <i class="fa-solid fa-images"></i> 履歴
+                <span id="galleryBadge" class="hidden absolute -top-1 -right-1 bg-rose-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">0</span>
             </button>
         </div>
     </header>
 
-    <!-- メインコンテンツ -->
-    <main class="flex-1 flex flex-col p-4 max-w-md mx-auto w-full justify-between space-y-4">
+    <!-- MAIN CONTAINER -->
+    <main class="flex-1 p-4 flex flex-col gap-4 overflow-y-auto">
 
-        <!-- カメラビューエリア -->
-        <div class="relative w-full aspect-[3/4] bg-black rounded-2xl overflow-hidden shadow-2xl border border-slate-800 flex items-center justify-center">
+        <section id="scannerSection" class="flex flex-col gap-4">
             
-            <!-- ビデオタグ (カメラ読み込み) -->
-            <video id="video" class="w-full h-full object-cover"></video>
-            
-            <!-- 非表示のキャンバス (画像処理・キャプチャ用) -->
-            <canvas id="canvas" class="hidden"></canvas>
-
-            <!-- スキャンガイドオーバーレイ -->
-            <div id="scanOverlay" class="absolute inset-0 border-[3rem] border-black/50 pointer-events-none flex items-center justify-center">
-                <div class="relative w-full h-40 border-2 border-indigo-400/80 rounded-lg overflow-hidden">
-                    <div class="scan-line"></div>
-                    <!-- 四隅のコーナー描画 -->
-                    <div class="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-indigo-400"></div>
-                    <div class="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-indigo-400"></div>
-                    <div class="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-indigo-400"></div>
-                    <div class="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-indigo-400"></div>
+            <!-- Step Progress Indicator -->
+            <div class="grid grid-cols-2 gap-2 text-center text-xs font-semibold">
+                <div id="step1Indicator" class="p-2.5 rounded-xl bg-indigo-900/80 text-indigo-200 border border-indigo-500/50 flex items-center justify-center gap-2">
+                    <span class="w-5 h-5 rounded-full bg-indigo-500 text-white text-xs flex items-center justify-center">1</span>
+                    <span>バーコード読取</span>
+                </div>
+                <div id="step2Indicator" class="p-2.5 rounded-xl bg-slate-800 text-slate-400 border border-slate-700 flex items-center justify-center gap-2 opacity-60">
+                    <span class="w-5 h-5 rounded-full bg-slate-600 text-white text-xs flex items-center justify-center">2</span>
+                    <span>商品写真撮影</span>
                 </div>
             </div>
 
-            <!-- エラー表示 -->
-            <div id="cameraError" class="hidden absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center p-6 text-center">
-                <i data-lucide="camera-off" class="w-12 h-12 text-rose-500 mb-3"></i>
-                <p id="errorMessage" class="text-sm text-slate-300">カメラにアクセスできません。アクセス許可を確認してください。</p>
-                <button id="retryBtn" class="mt-4 px-4 py-2 bg-indigo-600 rounded-lg text-sm font-semibold active:bg-indigo-700">再試行</button>
+            <!-- Toast / Message Alert Container -->
+            <div id="statusToast" class="hidden p-3 rounded-xl bg-indigo-900/60 border border-indigo-500/40 text-indigo-200 text-xs flex items-center justify-between animate-fade-in">
+                <span id="statusToastText" class="truncate">準備完了</span>
+                <i class="fa-solid fa-circle-info"></i>
             </div>
-        </div>
 
-        <!-- ステータス & 読み取り結果表示エリア -->
-        <div class="bg-slate-800 rounded-xl p-4 border border-slate-700/80 shadow-lg flex flex-col space-y-2">
-            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between">
-                <span>検出されたバーコード</span>
-                <span id="barcodeType" class="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full hidden">UNKNOWN</span>
+            <!-- Active Barcode Banner -->
+            <div id="barcodeResultBanner" class="hidden bg-emerald-950/80 border border-emerald-500/50 p-3 rounded-xl flex justify-between items-center text-emerald-200">
+                <div class="flex flex-col">
+                    <span class="text-[10px] uppercase font-bold text-emerald-400">読み取り完了 JAN/コード</span>
+                    <span id="detectedBarcode" class="text-xl font-mono font-bold tracking-wider">---</span>
+                </div>
+                <button id="resetBarcodeBtn" class="px-2.5 py-1.5 bg-emerald-800 hover:bg-emerald-700 text-emerald-100 rounded-lg text-xs font-medium flex items-center gap-1 transition">
+                    <i class="fa-solid fa-rotate-left"></i> 再読取
+                </button>
             </div>
-            <div class="flex items-center space-x-2">
-                <i data-lucide="scan-line" id="statusIcon" class="w-5 h-5 text-amber-400 animate-pulse"></i>
-                <div id="barcodeResult" class="text-xl font-mono font-bold text-slate-100 truncate">
-                    読み取り待機中...
+
+            <!-- Camera Viewfinder -->
+            <div class="scanner-container aspect-[3/4] w-full relative flex items-center justify-center shadow-lg border border-slate-700">
+                <video id="videoPreview" class="w-full h-full object-cover" playsinline autoplay muted></video>
+                <canvas id="captureCanvas" class="hidden"></canvas>
+                
+                <!-- Overlay Guides for Step 1 -->
+                <div id="scannerOverlay" class="absolute inset-0">
+                    <div class="guide-box"></div>
+                    <div class="scanner-laser"></div>
+                    <div class="absolute bottom-4 left-0 right-0 text-center text-xs text-white/80 bg-black/40 py-1 backdrop-blur-sm">
+                        枠内にバーコード（JAN）を合わせてください
+                    </div>
+                </div>
+
+                <!-- Overlay Guides for Step 2 -->
+                <div id="photoOverlay" class="hidden absolute inset-0 flex flex-col justify-between p-4 pointer-events-none">
+                    <div class="text-center text-xs text-emerald-300 bg-emerald-950/70 py-1.5 px-3 rounded-full backdrop-blur-md self-center border border-emerald-500/30">
+                        商品をフレームに収めて撮影ボタンを押してください
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <!-- 保存アクションエリア -->
-        <div class="space-y-3">
-            <button id="captureBtn" class="w-full py-4 bg-gradient-to-r from-indigo-500 to-purple-600 active:from-indigo-600 active:to-purple-700 rounded-xl font-bold text-lg shadow-lg shadow-indigo-500/25 flex items-center justify-center space-x-2 transition transform active:scale-[0.98]">
-                <i data-lucide="camera" class="w-6 h-6"></i>
-                <span>画像をキャプチャして保存</span>
-            </button>
-            <div class="text-center text-xs text-slate-500">
-                ※バーコード未検出時は「nobarcode_日時.jpg」で保存されます
+            <!-- Camera Controls -->
+            <div class="flex items-center justify-between gap-3 bg-slate-800/80 p-3 rounded-2xl border border-slate-700 backdrop-blur-sm">
+                <!-- Camera Switch Button -->
+                <button id="switchCamBtn" class="w-12 h-12 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 flex items-center justify-center text-lg transition active:scale-95">
+                    <i class="fa-solid fa-camera-rotate"></i>
+                </button>
+
+                <!-- Capture Button (Step 2 Only) -->
+                <button id="capturePhotoBtn" disabled class="flex-1 py-3 px-4 rounded-xl bg-slate-700 text-slate-400 font-bold flex items-center justify-center gap-2 transition opacity-50 cursor-not-allowed">
+                    <i class="fa-solid fa-circle-dot text-lg"></i>
+                    <span>写真撮影</span>
+                </button>
+
+                <!-- Manual Input Trigger -->
+                <button id="manualInputBtn" class="w-12 h-12 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 flex items-center justify-center text-lg transition active:scale-95" title="手動入力">
+                    <i class="fa-solid fa-keyboard"></i>
+                </button>
             </div>
-        </div>
+        </section>
+
+        <section id="gallerySection" class="hidden flex-col gap-4">
+            <div class="flex justify-between items-center">
+                <h2 class="font-bold text-sm text-slate-300 flex items-center gap-2">
+                    <i class="fa-solid fa-box-archive text-indigo-400"></i>
+                    保存済み画像 (<span id="galleryCount">0</span>)
+                </h2>
+                <div class="flex gap-2">
+                    <button id="downloadZipBtn" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center gap-1 transition shadow-sm">
+                        <i class="fa-solid fa-file-zipper"></i> ZIP一括保存
+                    </button>
+                    <button id="clearAllBtn" class="px-2.5 py-1.5 rounded-lg bg-rose-900/60 hover:bg-rose-800 text-rose-200 font-medium text-xs flex items-center gap-1 transition border border-rose-700/50">
+                        <i class="fa-solid fa-trash-can"></i> 全削除
+                    </button>
+                </div>
+            </div>
+
+            <!-- Empty State -->
+            <div id="emptyGallery" class="py-12 flex flex-col items-center justify-center text-slate-500 border-2 border-dashed border-slate-700 rounded-2xl">
+                <i class="fa-solid fa-photo-film text-4xl mb-2 text-slate-600"></i>
+                <p class="text-sm">撮影された画像はありません</p>
+                <p class="text-xs text-slate-600 mt-1">バーコードを読み取って撮影を行ってください</p>
+            </div>
+
+            <!-- Image Grid List -->
+            <div id="galleryGrid" class="grid grid-cols-2 gap-3"></div>
+        </section>
+
     </main>
 
-    <!-- トースト通知 -->
-    <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-emerald-500 text-white px-5 py-3 rounded-full shadow-2xl flex items-center space-x-2 opacity-0 pointer-events-none transition-all duration-300 z-50">
-        <i data-lucide="check-circle-2" class="w-5 h-5"></i>
-        <span id="toastMessage" class="text-sm font-medium">保存しました</span>
+    <!-- Image Preview Modal -->
+    <div id="previewModal" class="hidden fixed inset-0 z-50 bg-black/90 backdrop-blur-md p-4 flex flex-col items-center justify-center">
+        <div class="max-w-xs w-full bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden flex flex-col">
+            <div class="p-3 bg-slate-900 border-b border-slate-700 flex justify-between items-center">
+                <span id="previewModalTitle" class="font-mono text-sm text-indigo-300 font-bold truncate">---.jpg</span>
+                <button id="closePreviewBtn" class="text-slate-400 hover:text-white p-1">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+            <div class="p-2 bg-black flex items-center justify-center min-h-[240px]">
+                <img id="modalImg" class="max-h-[300px] w-auto object-contain rounded-lg" src="" alt="Captured Image">
+            </div>
+            <div class="p-3 bg-slate-800 border-t border-slate-700 flex gap-2">
+                <button id="downloadSingleBtn" class="flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded-lg flex items-center justify-center gap-1.5 transition">
+                    <i class="fa-solid fa-download"></i> 保存 (.jpg)
+                </button>
+                <button id="deleteSingleBtn" class="py-2 px-3 bg-rose-900/80 hover:bg-rose-800 text-rose-200 font-semibold text-xs rounded-lg flex items-center justify-center transition">
+                    <i class="fa-solid fa-trash-can"></i>
+                </button>
+            </div>
+        </div>
     </div>
 
     <script>
-        // Lucideアイコンの初期化
-        lucide.createIcons();
-
-        // UI要素の取得
-        const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
-        const barcodeResult = document.getElementById('barcodeResult');
-        const barcodeType = document.getElementById('barcodeType');
-        const statusIcon = document.getElementById('statusIcon');
-        const captureBtn = document.getElementById('captureBtn');
-        const switchCamBtn = document.getElementById('switchCamBtn');
-        const torchBtn = document.getElementById('torchBtn');
-        const cameraError = document.getElementById('cameraError');
-        const errorMessage = document.getElementById('errorMessage');
-        const retryBtn = document.getElementById('retryBtn');
-        const toast = document.getElementById('toast');
-        const toastMessage = document.getElementById('toastMessage');
-
-        // 状態変数
-        let codeReader = null;
+        // App State
+        let currentStream = null;
         let selectedDeviceId = null;
-        let videoDevices = [];
+        let codeReader = null;
         let currentBarcode = null;
-        let currentFormat = null;
-        let isTorchOn = false;
+        let currentStep = 1; // 1: Scan Barcode, 2: Capture Photo
+        let db = null;
+        let activePreviewId = null;
 
-        // ZXing バーコードリーダーの初期化
-        async function initScanner() {
-            try {
-                codeReader = new ZXing.BrowserMultiFormatReader();
-                
-                // 使用可能なビデオ入力デバイス（カメラ）を取得
-                const videoInputDevices = await codeReader.listVideoInputDevices();
-                videoDevices = videoInputDevices;
+        // UI Elements
+        const videoElem = document.getElementById('videoPreview');
+        const canvasElem = document.getElementById('captureCanvas');
+        const scannerSection = document.getElementById('scannerSection');
+        const gallerySection = document.getElementById('gallerySection');
+        const tabScannerBtn = document.getElementById('tabScannerBtn');
+        const tabGalleryBtn = document.getElementById('tabGalleryBtn');
+        const step1Indicator = document.getElementById('step1Indicator');
+        const step2Indicator = document.getElementById('step2Indicator');
+        const barcodeResultBanner = document.getElementById('barcodeResultBanner');
+        const detectedBarcodeElem = document.getElementById('detectedBarcode');
+        const resetBarcodeBtn = document.getElementById('resetBarcodeBtn');
+        const scannerOverlay = document.getElementById('scannerOverlay');
+        const photoOverlay = document.getElementById('photoOverlay');
+        const capturePhotoBtn = document.getElementById('capturePhotoBtn');
+        const switchCamBtn = document.getElementById('switchCamBtn');
+        const manualInputBtn = document.getElementById('manualInputBtn');
+        const statusToast = document.getElementById('statusToast');
+        const statusToastText = document.getElementById('statusToastText');
+        const galleryGrid = document.getElementById('galleryGrid');
+        const emptyGallery = document.getElementById('emptyGallery');
+        const galleryCount = document.getElementById('galleryCount');
+        const galleryBadge = document.getElementById('galleryBadge');
+        const downloadZipBtn = document.getElementById('downloadZipBtn');
+        const clearAllBtn = document.getElementById('clearAllBtn');
+        const previewModal = document.getElementById('previewModal');
+        const previewModalTitle = document.getElementById('previewModalTitle');
+        const modalImg = document.getElementById('modalImg');
+        const closePreviewBtn = document.getElementById('closePreviewBtn');
+        const downloadSingleBtn = document.getElementById('downloadSingleBtn');
+        const deleteSingleBtn = document.getElementById('deleteSingleBtn');
 
-                if (videoInputDevices.length === 0) {
-                    showError("カメラが見つかりませんでした。");
-                    return;
-                }
-
-                // 背面カメラを優先選択
-                const backCamera = videoInputDevices.find(device => 
-                    /back|rear|environment/i.test(device.label)
-                );
-                selectedDeviceId = backCamera ? backCamera.deviceId : videoInputDevices[0].deviceId;
-
-                startScanning();
-            } catch (err) {
-                console.error("初期化エラー:", err);
-                showError("カメラへのアクセス許可が必要です。設定を確認してください。");
-            }
-        }
-
-        // スキャン開始処理
-        function startScanning() {
-            cameraError.classList.add('hidden');
-            codeReader.decodeFromVideoDevice(selectedDeviceId, 'video', (result, err) => {
-                if (result) {
-                    // バーコード検出時
-                    currentBarcode = result.getText();
-                    currentFormat = result.getBarcodeFormat();
-                    
-                    // UI更新
-                    barcodeResult.textContent = currentBarcode;
-                    barcodeType.textContent = getFormatName(currentFormat);
-                    barcodeType.classList.remove('hidden');
-
-                    statusIcon.setAttribute('data-lucide', 'check-circle-2');
-                    statusIcon.className = "w-5 h-5 text-emerald-400";
-                    lucide.createIcons();
-
-                    // 効果音（ビープ音）を軽く鳴らす
-                    playBeep();
-                }
-            }).catch((err) => {
-                console.error("スキャンエラー:", err);
-                showError("カメラストリームの読み込みに失敗しました。");
+        function initDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open('BarcodePhotoDB', 1);
+                request.onupgradeneeded = (e) => {
+                    const database = e.target.result;
+                    if (!database.objectStoreNames.contains('photos')) {
+                        database.createObjectStore('photos', { keyPath: 'id', autoIncrement: true });
+                    }
+                };
+                request.onsuccess = (e) => {
+                    db = e.target.result;
+                    updateGalleryUI();
+                    resolve(db);
+                };
+                request.onerror = (e) => reject('Database Error: ' + e.target.errorCode);
             });
         }
 
-        // フォーマット名の変換
-        function getFormatName(formatEnum) {
-            // ZXingのFormat列挙体の文字列化
-            return ZXing.BarcodeFormat[formatEnum] || 'UNKNOWN';
+        async function savePhotoToDB(barcode, blob) {
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction('photos', 'readwrite');
+                const store = tx.objectStore('photos');
+                const item = {
+                    barcode: barcode,
+                    blob: blob,
+                    timestamp: new Date().getTime()
+                };
+                const request = store.add(item);
+                request.onsuccess = () => {
+                    updateGalleryUI();
+                    resolve();
+                };
+                request.onerror = (e) => reject(e);
+            });
         }
 
-        // カメラ切り替え処理
-        switchCamBtn.addEventListener('click', () => {
-            if (videoDevices.length <= 1) {
-                showToast("利用可能な他のカメラがありません");
+        async function getAllPhotosFromDB() {
+            return new Promise((resolve, reject) => {
+                if (!db) return resolve([]);
+                const tx = db.transaction('photos', 'readonly');
+                const store = tx.objectStore('photos');
+                const request = store.getAll();
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = (e) => reject(e);
+            });
+        }
+
+        async function deletePhotoFromDB(id) {
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction('photos', 'readwrite');
+                const store = tx.objectStore('photos');
+                const request = store.delete(id);
+                request.onsuccess = () => {
+                    updateGalleryUI();
+                    resolve();
+                };
+                request.onerror = (e) => reject(e);
+            });
+        }
+
+        async function clearAllPhotosFromDB() {
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction('photos', 'readwrite');
+                const store = tx.objectStore('photos');
+                const request = store.clear();
+                request.onsuccess = () => {
+                    updateGalleryUI();
+                    resolve();
+                };
+                request.onerror = (e) => reject(e);
+            });
+        }
+
+        async function startCamera() {
+            try {
+                if (!codeReader) {
+                    codeReader = new ZXing.BrowserMultiFormatReader();
+                }
+
+                // Get available cameras
+                const videoInputDevices = await codeReader.listVideoInputDevices();
+                if (videoInputDevices.length === 0) {
+                    showToast('利用可能なカメラが見つかりません');
+                    return;
+                }
+
+                // Prefer back camera
+                if (!selectedDeviceId) {
+                    const backCam = videoInputDevices.find(device => 
+                        device.label.toLowerCase().includes('back') || 
+                        device.label.toLowerCase().includes('rear') || 
+                        device.label.toLowerCase().includes('環境')
+                    );
+                    selectedDeviceId = backCam ? backCam.deviceId : videoInputDevices[0].deviceId;
+                }
+
+                showToast('カメラを起動中...');
+
+                if (currentStep === 1) {
+                    // Start barcode reading continuous mode
+                    codeReader.decodeFromVideoDevice(selectedDeviceId, 'videoPreview', (result, err) => {
+                        if (result && currentStep === 1) {
+                            handleBarcodeDetected(result.getText());
+                        }
+                    });
+                } else {
+                    // Plain camera stream for taking photo
+                    if (codeReader) codeReader.reset();
+                    const constraints = {
+                        video: {
+                            deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
+                            facingMode: 'environment'
+                        }
+                    };
+                    currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    videoElem.srcObject = currentStream;
+                }
+
+                showToast(currentStep === 1 ? 'バーコードをかざしてください' : '撮影の準備ができました');
+            } catch (err) {
+                console.error('Camera initialization error:', err);
+                showToast('カメラ起動エラー: ' + err.message);
+            }
+        }
+
+        function stopCamera() {
+            if (codeReader) {
+                codeReader.reset();
+            }
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+                currentStream = null;
+            }
+        }
+
+        function handleBarcodeDetected(code) {
+            currentBarcode = code.trim();
+            detectedBarcodeElem.textContent = currentBarcode;
+            
+            // Audio Feedback
+            playBeep();
+
+            // Transition to Step 2
+            setStep(2);
+            showToast('バーコードを読み取りました');
+        }
+
+        function setStep(step) {
+            currentStep = step;
+            if (step === 1) {
+                currentBarcode = null;
+                barcodeResultBanner.classList.add('hidden');
+                scannerOverlay.classList.remove('hidden');
+                photoOverlay.classList.add('hidden');
+                
+                step1Indicator.className = "p-2.5 rounded-xl bg-indigo-900/80 text-indigo-200 border border-indigo-500/50 flex items-center justify-center gap-2";
+                step2Indicator.className = "p-2.5 rounded-xl bg-slate-800 text-slate-400 border border-slate-700 flex items-center justify-center gap-2 opacity-60";
+
+                capturePhotoBtn.disabled = true;
+                capturePhotoBtn.className = "flex-1 py-3 px-4 rounded-xl bg-slate-700 text-slate-400 font-bold flex items-center justify-center gap-2 transition opacity-50 cursor-not-allowed";
+                
+                startCamera();
+            } else if (step === 2) {
+                barcodeResultBanner.classList.remove('hidden');
+                scannerOverlay.classList.add('hidden');
+                photoOverlay.classList.remove('hidden');
+
+                step1Indicator.className = "p-2.5 rounded-xl bg-slate-800 text-slate-400 border border-slate-700 flex items-center justify-center gap-2 opacity-60";
+                step2Indicator.className = "p-2.5 rounded-xl bg-indigo-900/80 text-indigo-200 border border-indigo-500/50 flex items-center justify-center gap-2";
+
+                capturePhotoBtn.disabled = false;
+                capturePhotoBtn.className = "flex-1 py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-bold flex items-center justify-center gap-2 transition shadow-lg shadow-indigo-600/30";
+                
+                startCamera();
+            }
+        }
+
+        async function capturePhoto() {
+            if (!currentBarcode) {
+                showToast('バーコードが設定されていません');
                 return;
             }
-            // 次のカメラを選択
-            const currentIndex = videoDevices.findIndex(d => d.deviceId === selectedDeviceId);
-            const nextIndex = (currentIndex + 1) % videoDevices.length;
-            selectedDeviceId = videoDevices[nextIndex].deviceId;
 
-            codeReader.reset();
-            startScanning();
-        });
+            // Set canvas dimensions to video feed real dimensions
+            canvasElem.width = videoElem.videoWidth || 640;
+            canvasElem.height = videoElem.videoHeight || 480;
 
-        // キャプチャ & 画像保存処理
-        captureBtn.addEventListener('click', () => {
-            if (!video.srcObject) return;
+            const ctx = canvasElem.getContext('2d');
+            ctx.drawImage(videoElem, 0, 0, canvasElem.width, canvasElem.height);
 
-            // Canvasに現在のビデオフレームを描画
-            canvas.width = video.videoWidth || 640;
-            canvas.height = video.videoHeight || 480;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            // Convert canvas to Blob
+            canvasElem.toBlob(async (blob) => {
+                if (blob) {
+                    await savePhotoToDB(currentBarcode, blob);
+                    showToast(`保存しました: ${currentBarcode}.jpg`);
+                    playShutterSound();
+                    
+                    // Reset to Step 1 for next item
+                    setStep(1);
+                } else {
+                    showToast('画像のキャプチャに失敗しました');
+                }
+            }, 'image/jpeg', 0.9);
+        }
 
-            // 保存ファイル名の決定
-            let filename = '';
-            if (currentBarcode) {
-                // ファイル名に使えない文字を除去
-                const safeBarcode = currentBarcode.replace(/[/\\?%*:|"<>]/g, '-');
-                filename = `${safeBarcode}.jpg`;
-            } else {
-                // バーコードが読み取れていない場合はタイムスタンプ
-                const now = new Date();
-                const timestamp = now.getFullYear() +
-                    String(now.getMonth() + 1).padStart(2, '0') +
-                    String(now.getDate()).padStart(2, '0') + '_' +
-                    String(now.getHours()).padStart(2, '0') +
-                    String(now.getMinutes()).padStart(2, '0') +
-                    String(now.getSeconds()).padStart(2, '0');
-                filename = `nobarcode_${timestamp}.jpg`;
-            }
-
-            // 画像をダウンロード処理
-            canvas.toBlob((blob) => {
-                if (!blob) return;
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(blob);
-                link.download = filename;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                URL.revokeObjectURL(link.href);
-
-                showToast(`保存しました: ${filename}`);
-            }, 'image/jpeg', 0.92);
-        });
-
-        // ビープ音生成 (Web Audio API)
         function playBeep() {
             try {
-                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                const osc = audioCtx.createOscillator();
-                const gain = audioCtx.createGain();
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
                 osc.type = 'sine';
-                osc.frequency.value = 1000; // 1kHz
-                gain.gain.value = 0.1; // 音量
+                osc.frequency.value = 1800;
+                gain.gain.value = 0.1;
                 osc.connect(gain);
-                gain.connect(audioCtx.destination);
+                gain.connect(ctx.destination);
                 osc.start();
-                osc.stop(audioCtx.currentTime + 0.1); // 0.1秒間発音
+                osc.stop(ctx.currentTime + 0.15);
             } catch (e) {
-                // AudioContext非対応環境やブラウザのインタラクション制限用エラーを無視
+                console.log('Audio context not allowed yet');
             }
         }
 
-        // トースト通知表示
-        function showToast(message) {
-            toastMessage.textContent = message;
-            toast.classList.remove('opacity-0', 'pointer-events-none');
-            toast.classList.add('opacity-100', '-translate-y-2');
+        function playShutterSound() {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(400, ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.2, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.1);
+            } catch (e) {}
+        }
 
+        function showToast(msg) {
+            statusToastText.textContent = msg;
+            statusToast.classList.remove('hidden');
             setTimeout(() => {
-                toast.classList.remove('opacity-100', '-translate-y-2');
-                toast.classList.add('opacity-0', 'pointer-events-none');
+                statusToast.classList.add('hidden');
             }, 3000);
         }
 
-        // エラー表示処理
-        function showError(msg) {
-            errorMessage.textContent = msg;
-            cameraError.classList.remove('hidden');
+        async function updateGalleryUI() {
+            const photos = await getAllPhotosFromDB();
+            galleryCount.textContent = photos.length;
+            galleryBadge.textContent = photos.length;
+            if (photos.length > 0) {
+                galleryBadge.classList.remove('hidden');
+                emptyGallery.classList.add('hidden');
+                galleryGrid.classList.remove('hidden');
+            } else {
+                galleryBadge.classList.add('hidden');
+                emptyGallery.classList.remove('hidden');
+                galleryGrid.classList.add('hidden');
+            }
+
+            galleryGrid.innerHTML = '';
+            // Render items in reverse (newest first)
+            photos.reverse().forEach(item => {
+                const url = URL.createObjectURL(item.blob);
+                const card = document.createElement('div');
+                card.className = "bg-slate-800 rounded-xl overflow-hidden border border-slate-700 flex flex-col group relative shadow-md";
+                card.innerHTML = `
+                    <div class="aspect-square bg-black overflow-hidden relative cursor-pointer">
+                        <img src="${url}" alt="${item.barcode}" class="w-full h-full object-cover group-hover:scale-105 transition duration-200">
+                    </div>
+                    <div class="p-2.5 bg-slate-800 flex justify-between items-center gap-1 border-t border-slate-700/50">
+                        <span class="font-mono text-xs text-indigo-300 font-bold truncate flex-1" title="${item.barcode}">${item.barcode}</span>
+                        <button class="download-btn p-1.5 text-slate-400 hover:text-emerald-400 text-xs transition" title="ダウンロード">
+                            <i class="fa-solid fa-download"></i>
+                        </button>
+                    </div>
+                `;
+
+                // Card Click -> Open Modal
+                card.querySelector('.aspect-square').addEventListener('click', () => {
+                    openPreviewModal(item, url);
+                });
+
+                // Download Button Click
+                card.querySelector('.download-btn').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    saveAs(item.blob, `${item.barcode}.jpg`);
+                });
+
+                galleryGrid.appendChild(card);
+            });
         }
 
-        // 再試行ボタン
-        retryBtn.addEventListener('click', () => {
-            if (codeReader) {
-                codeReader.reset();
+        function openPreviewModal(item, imgUrl) {
+            activePreviewId = item.id;
+            previewModalTitle.textContent = `${item.barcode}.jpg`;
+            modalImg.src = imgUrl;
+            previewModal.classList.remove('hidden');
+
+            downloadSingleBtn.onclick = () => {
+                saveAs(item.blob, `${item.barcode}.jpg`);
+            };
+
+            deleteSingleBtn.onclick = async () => {
+                if (confirm('この画像を削除しますか？')) {
+                    await deletePhotoFromDB(item.id);
+                    previewModal.classList.add('hidden');
+                    showToast('削除しました');
+                }
+            };
+        }
+
+        async function downloadAllZip() {
+            const photos = await getAllPhotosFromDB();
+            if (photos.length === 0) {
+                showToast('保存されている画像がありません');
+                return;
             }
-            initScanner();
+
+            showToast('ZIPを作成中...');
+            const zip = new JSZip();
+            const folder = zip.folder("barcode_photos");
+
+            photos.forEach(item => {
+                folder.file(`${item.barcode}.jpg`, item.blob);
+            });
+
+            const content = await zip.generateAsync({ type: "blob" });
+            saveAs(content, `barcode_photos_${new Date().toISOString().slice(0,10)}.zip`);
+            showToast('ZIPダウンロードを開始しました');
+        }
+
+        tabScannerBtn.addEventListener('click', () => {
+            tabScannerBtn.className = "px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium text-xs flex items-center gap-1 transition";
+            tabGalleryBtn.className = "px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 font-medium text-xs flex items-center gap-1 transition relative";
+            scannerSection.classList.remove('hidden');
+            gallerySection.classList.add('hidden');
+            startCamera();
         });
 
-        // ページロード時の初期化
-        window.addEventListener('load', initScanner);
+        tabGalleryBtn.addEventListener('click', () => {
+            tabGalleryBtn.className = "px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium text-xs flex items-center gap-1 transition relative";
+            tabScannerBtn.className = "px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 font-medium text-xs flex items-center gap-1 transition";
+            scannerSection.classList.add('hidden');
+            gallerySection.classList.remove('hidden');
+            stopCamera();
+            updateGalleryUI();
+        });
 
-        // ページが閉じられる・裏に回った際のリソース解放
-        window.addEventListener('beforeunload', () => {
-            if (codeReader) {
-                codeReader.reset();
+        resetBarcodeBtn.addEventListener('click', () => {
+            setStep(1);
+        });
+
+        capturePhotoBtn.addEventListener('click', () => {
+            if (currentStep === 2) {
+                capturePhoto();
             }
         });
+
+        switchCamBtn.addEventListener('click', async () => {
+            if (!codeReader) return;
+            const videoInputDevices = await codeReader.listVideoInputDevices();
+            if (videoInputDevices.length > 1) {
+                const currentIndex = videoInputDevices.findIndex(d => d.deviceId === selectedDeviceId);
+                const nextIndex = (currentIndex + 1) % videoInputDevices.length;
+                selectedDeviceId = videoInputDevices[nextIndex].deviceId;
+                stopCamera();
+                startCamera();
+            } else {
+                showToast('利用可能な切り替えカメラがありません');
+            }
+        });
+
+        manualInputBtn.addEventListener('click', () => {
+            const input = prompt('JAN/バーコード番号を直接入力してください:');
+            if (input && input.trim() !== '') {
+                handleBarcodeDetected(input.trim());
+            }
+        });
+
+        closePreviewBtn.addEventListener('click', () => {
+            previewModal.classList.add('hidden');
+        });
+
+        downloadZipBtn.addEventListener('click', downloadAllZip);
+
+        clearAllBtn.addEventListener('click', async () => {
+            if (confirm('すべての撮影履歴を消去してもよろしいですか？')) {
+                await clearAllPhotosFromDB();
+                showToast('すべての履歴を削除しました');
+            }
+        });
+
+        // Initialize App on Window Load
+        window.onload = async () => {
+            await initDB();
+            setStep(1);
+        };
     </script>
 </body>
 </html>
